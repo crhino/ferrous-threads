@@ -8,7 +8,7 @@
 #![feature(core)]
 use std::boxed::FnBox;
 use std::thread::{scoped, JoinGuard};
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::sync::mpsc::{SendError, Sender, Receiver, channel};
 
 pub struct Task {
     task_func: Box<FnBox() + Send>,
@@ -36,17 +36,24 @@ impl<'a> TaskPool<'a> {
         TaskPool { queue: sn, worker: guard }
     }
 
+    fn enqueue(&self, task: Task) -> Result<(), SendError<Task>> {
+        self.queue.send(task)
+    }
+
     fn worker(rc: Receiver<Task>) {
         loop {
-            let task = rc.recv().unwrap();
-            task.run();
+            let msg = rc.recv();
+            match msg {
+                Ok(task) => task.run(),
+                Err(_) => break,
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::Task;
+    use super::{Task, TaskPool};
     use std::sync::mpsc::{channel};
 
     #[test]
@@ -81,5 +88,19 @@ mod test {
 
         assert!(rc1.recv().unwrap() == 10);
         assert!(rc2.recv().unwrap().is_some());
+    }
+
+    #[test]
+    fn test_task_pool() {
+        let (sn1, rc1) = channel::<isize>();
+        let task_closure = move || {
+            sn1.send(10).unwrap();
+        };
+        let task = Task::new(Box::new(task_closure));
+        let taskpool = TaskPool::new();
+
+        taskpool.enqueue(task).unwrap();
+
+        assert!(rc1.recv().unwrap() == 10);
     }
 }
