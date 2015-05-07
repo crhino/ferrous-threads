@@ -62,7 +62,7 @@ impl<T> MPMCQueue<T> for MutexLinkedList<T> {
         unsafe {
             let _lock = self.lock.lock();
             let old = *(self.tail.borrow_mut().deref_mut());
-            let mut next = *((*old).next.borrow_mut().deref_mut());
+            let next = *((*old).next.borrow_mut().deref_mut());
 
             if !next.is_null() {
                 assert!((*old).value.is_none());
@@ -95,6 +95,8 @@ impl<T> Drop for MutexLinkedList<T> {
 mod test {
     use super::MutexLinkedList;
     use queue::MPMCQueue;
+    use std::sync::{Arc};
+    use std::thread::scoped;
 
     #[test]
     fn test_push_pop() {
@@ -104,5 +106,36 @@ mod test {
         q.push(2);
         assert_eq!(q.pop().unwrap(), 1);
         assert_eq!(q.pop().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_concurrent() {
+        let q = Arc::new(MutexLinkedList::new());
+        let mut guard_vec = Vec::new();
+        for i in 0..10 {
+            let qu = q.clone();
+            guard_vec.push(scoped(move || {
+                qu.push(i as u8);
+            }));
+        }
+
+        for x in guard_vec.into_iter() {
+            x.join();
+        }
+
+        guard_vec = Vec::new();
+        for _i in 0..10 {
+            let qu = q.clone();
+            guard_vec.push(scoped(move || {
+                let popped = qu.pop().unwrap();
+                let mut found = false;
+                for x in 0..10 {
+                    if popped == x {
+                        found = true
+                    }
+                }
+                assert!(found);
+            }));
+        }
     }
 }
