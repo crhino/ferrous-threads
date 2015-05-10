@@ -238,7 +238,7 @@ mod tests {
         for i in 0..10 {
             let sn = q.clone();
             guard_vec.push(thread::scoped(move || {
-                sn.send(i as u8);
+                assert!(sn.send(i as u8).is_ok());
             }));
         }
 

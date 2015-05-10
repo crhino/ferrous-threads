@@ -3,7 +3,7 @@ use std::cell::{RefCell};
 use std::ptr;
 use std::boxed;
 use std::ops::DerefMut;
-use std::sync::{Mutex};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 struct Node<T> {
@@ -21,10 +21,29 @@ impl<T> Node<T> {
 }
 
 #[derive(Debug)]
-struct MutexLinkedList<T> {
+struct ListInner<T> {
     lock: Mutex<bool>,
     head: RefCell<*mut Node<T>>,
     tail: RefCell<*mut Node<T>>,
+}
+
+impl<T> ListInner<T> {
+    fn new() -> ListInner<T> {
+        // Initialize a stub ptr in order to correctly set up the tail and head ptrs.
+        let stub = unsafe { boxed::into_raw(box Node {
+            value: None, next: RefCell::new(ptr::null_mut())
+        }) };
+        ListInner {
+            lock: Mutex::new(true),
+            head: RefCell::new(stub),
+            tail: RefCell::new(stub),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MutexLinkedList<T> {
+    inner: Arc<ListInner<T>>,
 }
 
 producer_consumer!(MutexLinkedList<T>);
@@ -34,19 +53,23 @@ unsafe impl<T: Send> Send for MutexLinkedList<T> { }
 
 impl<T> MutexLinkedList<T> {
     pub fn new() -> MutexLinkedList<T> {
-        // Initialize a stub ptr in order to correctly set up the tail and head ptrs.
-        let stub = unsafe { boxed::into_raw(box Node {
-            value: None, next: RefCell::new(ptr::null_mut())
-        }) };
         MutexLinkedList {
-            lock: Mutex::new(true),
-            head: RefCell::new(stub),
-            tail: RefCell::new(stub),
+            inner: Arc::new(ListInner::new()),
         }
     }
 }
 
 impl<T: Send> MPMCQueue<T> for MutexLinkedList<T> {
+    fn push(&self, value: T) -> Result<(), T> {
+        self.inner.push(value)
+    }
+
+    fn pop(&self) -> Option<T> {
+        self.inner.pop()
+    }
+}
+
+impl<T: Send> ListInner<T> {
     fn push(&self, value: T) -> Result<(), T> {
         unsafe {
             let node = Node::new(value);
@@ -81,7 +104,7 @@ impl<T: Send> MPMCQueue<T> for MutexLinkedList<T> {
     }
 }
 
-impl<T> Drop for MutexLinkedList<T> {
+impl<T> Drop for ListInner<T> {
     fn drop(&mut self) {
         unsafe {
             let mut cur = *(self.head.borrow_mut().deref_mut());
@@ -98,27 +121,26 @@ impl<T> Drop for MutexLinkedList<T> {
 mod test {
     use super::MutexLinkedList;
     use queue::{MPMCQueue, Sender, Receiver};
-    use std::sync::{Arc};
     use std::thread::scoped;
 
     #[test]
     fn test_push_pop() {
         let q = MutexLinkedList::new();
         assert!(q.pop().is_none());
-        q.push(1);
-        q.push(2);
+        assert!(q.push(1).is_ok());
+        assert!(q.push(2).is_ok());
         assert_eq!(q.pop().unwrap(), 1);
         assert_eq!(q.pop().unwrap(), 2);
     }
 
     #[test]
     fn test_concurrent() {
-        let q = Arc::new(MutexLinkedList::new());
+        let q = MutexLinkedList::new();
         let mut guard_vec = Vec::new();
         for i in 0..10 {
             let qu = q.clone();
             guard_vec.push(scoped(move || {
-                qu.push(i as u8);
+                assert!(qu.push(i as u8).is_ok());
             }));
         }
 
@@ -144,13 +166,13 @@ mod test {
 
     #[test]
     fn test_producer_consumer() {
-        let q = Arc::new(MutexLinkedList::new());
+        let q = MutexLinkedList::new();
 
         let mut guard_vec = Vec::new();
         for i in 0..10 {
             let sn = q.clone();
             guard_vec.push(scoped(move || {
-                sn.send(i as u8);
+                assert!(sn.send(i as u8).is_ok());
             }));
         }
 
