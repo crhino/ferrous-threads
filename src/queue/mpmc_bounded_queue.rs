@@ -38,6 +38,8 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, Acquire};
 
+use queue::{MPMCQueue, Sender, Receiver};
+
 struct Node<T> {
     sequence: AtomicUsize,
     value: Option<T>,
@@ -63,6 +65,8 @@ unsafe impl<T: Sync> Sync for State<T> {}
 pub struct Queue<T> {
     state: Arc<State<T>>,
 }
+
+producer_consumer!(Queue<T>);
 
 impl<T: Send> State<T> {
     fn with_capacity(capacity: usize) -> State<T> {
@@ -152,12 +156,14 @@ impl<T: Send> Queue<T> {
             state: Arc::new(State::with_capacity(capacity))
         }
     }
+}
 
-    pub fn push(&self, value: T) -> Result<(), T> {
+impl<T: Send> MPMCQueue<T> for Queue<T> {
+    fn push(&self, value: T) -> Result<(), T> {
         self.state.push(value)
     }
 
-    pub fn pop(&self) -> Option<T> {
+    fn pop(&self) -> Option<T> {
         self.state.pop()
     }
 }
@@ -172,6 +178,7 @@ impl<T: Send> Clone for Queue<T> {
 mod tests {
     use std::thread;
     use std::sync::mpsc::channel;
+    use queue::{MPMCQueue, Sender, Receiver};
     use super::Queue;
 
     #[test]
@@ -220,6 +227,38 @@ mod tests {
         }
         for _ in (0..nthreads) {
             rx.recv().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_producer_consumer() {
+        let q = Queue::with_capacity(25);
+
+        let mut guard_vec = Vec::new();
+        for i in 0..10 {
+            let sn = q.clone();
+            guard_vec.push(thread::scoped(move || {
+                sn.send(i as u8);
+            }));
+        }
+
+        for x in guard_vec.into_iter() {
+            x.join();
+        }
+
+        guard_vec = Vec::new();
+        for _i in 0..10 {
+            let rc = q.clone();
+            guard_vec.push(thread::scoped(move || {
+                let popped = rc.recv().unwrap();
+                let mut found = false;
+                for x in 0..10 {
+                    if popped == x {
+                        found = true
+                    }
+                }
+                assert!(found);
+            }));
         }
     }
 }

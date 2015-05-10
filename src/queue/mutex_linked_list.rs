@@ -1,4 +1,4 @@
-use queue::MPMCQueue;
+use queue::{MPMCQueue, Sender, Receiver};
 use std::cell::{RefCell};
 use std::ptr;
 use std::boxed;
@@ -27,6 +27,8 @@ struct MutexLinkedList<T> {
     tail: RefCell<*mut Node<T>>,
 }
 
+producer_consumer!(MutexLinkedList<T>);
+
 unsafe impl<T: Sync> Sync for MutexLinkedList<T> { }
 unsafe impl<T: Send> Send for MutexLinkedList<T> { }
 
@@ -44,8 +46,8 @@ impl<T> MutexLinkedList<T> {
     }
 }
 
-impl<T> MPMCQueue<T> for MutexLinkedList<T> {
-    fn push(&self, value: T) {
+impl<T: Send> MPMCQueue<T> for MutexLinkedList<T> {
+    fn push(&self, value: T) -> Result<(), T> {
         unsafe {
             let node = Node::new(value);
 
@@ -56,6 +58,7 @@ impl<T> MPMCQueue<T> for MutexLinkedList<T> {
 
             *(self.head.borrow_mut().deref_mut()) = node;
         }
+        Ok(())
     }
 
     fn pop(&self) -> Option<T> {
@@ -94,7 +97,7 @@ impl<T> Drop for MutexLinkedList<T> {
 #[cfg(test)]
 mod test {
     use super::MutexLinkedList;
-    use queue::MPMCQueue;
+    use queue::{MPMCQueue, Sender, Receiver};
     use std::sync::{Arc};
     use std::thread::scoped;
 
@@ -128,6 +131,38 @@ mod test {
             let qu = q.clone();
             guard_vec.push(scoped(move || {
                 let popped = qu.pop().unwrap();
+                let mut found = false;
+                for x in 0..10 {
+                    if popped == x {
+                        found = true
+                    }
+                }
+                assert!(found);
+            }));
+        }
+    }
+
+    #[test]
+    fn test_producer_consumer() {
+        let q = Arc::new(MutexLinkedList::new());
+
+        let mut guard_vec = Vec::new();
+        for i in 0..10 {
+            let sn = q.clone();
+            guard_vec.push(scoped(move || {
+                sn.send(i as u8);
+            }));
+        }
+
+        for x in guard_vec.into_iter() {
+            x.join();
+        }
+
+        guard_vec = Vec::new();
+        for _i in 0..10 {
+            let rc = q.clone();
+            guard_vec.push(scoped(move || {
+                let popped = rc.recv().unwrap();
                 let mut found = false;
                 for x in 0..10 {
                     if popped == x {
