@@ -5,36 +5,55 @@
  *
  */
 use std::boxed::FnBox;
-use std::thread::{scoped, JoinGuard};
-use std::sync::mpsc::{SendError, Sender, Receiver, channel};
+use std::thread::{self, scoped, JoinGuard};
+use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
 
-pub struct Task {
+pub enum Task {
+    Data(TaskData),
+    Stop,
+}
+
+pub struct TaskData {
     task_func: Box<FnBox() + Send>,
+}
+
+impl TaskData {
+    pub fn run(self) {
+        self.task_func.call_box(())
+    }
 }
 
 impl Task {
     pub fn new(func: Box<FnBox() + Send>) -> Task {
-        Task { task_func: func }
+        Task::Data(TaskData { task_func: func })
     }
 
     pub fn run(self) {
-        (self.task_func)()
+        match self {
+            Task::Data(task) => task.run(),
+            Task::Stop => (),
+        }
     }
 }
 
 struct TaskPool<'a> {
     queue: Sender<Task>,
-    worker: JoinGuard<'a, ()>,
+    workers: Vec<JoinGuard<'a, ()>>,
 }
 
 impl<'a> TaskPool<'a> {
-    fn new() -> TaskPool<'a> {
-        let (sn, rc) = channel::<Task>();
-        let guard = scoped(move || { TaskPool::worker(rc) });
-        TaskPool { queue: sn, worker: guard }
+    fn new(num_threads: u8) -> TaskPool<'a> {
+        let (sn, rc) = mpmc_channel::<Task>(num_threads as usize);
+        let mut guards = Vec::new();
+        for _i in 0..num_threads {
+            let rc = rc.clone();
+            let thr = scoped(move || { TaskPool::worker(rc) });
+            guards.push(thr);
+        }
+        TaskPool { queue: sn, workers: guards }
     }
 
-    fn enqueue(&self, task: Task) -> Result<(), SendError<Task>> {
+    fn enqueue(&self, task: Task) -> Result<(), Task> {
         self.queue.send(task)
     }
 
@@ -42,9 +61,19 @@ impl<'a> TaskPool<'a> {
         loop {
             let msg = rc.recv();
             match msg {
-                Ok(task) => task.run(),
-                Err(_) => break,
+                Some(Task::Data(task)) => task.run(),
+                Some(Task::Stop) => break,
+                None  => thread::yield_now(),
             }
+        }
+    }
+}
+
+impl<'a> Drop for TaskPool<'a> {
+    fn drop(&mut self) {
+        // Send stop message without blocking.
+        for _thr in self.workers.iter() {
+            self.enqueue(Task::Stop).ok().expect("Could not send Stop message")
         }
     }
 }
@@ -95,10 +124,34 @@ mod test {
             sn1.send(10).unwrap();
         };
         let task = Task::new(Box::new(task_closure));
-        let taskpool = TaskPool::new();
+        let taskpool = TaskPool::new(1);
 
-        taskpool.enqueue(task).unwrap();
+        taskpool.enqueue(task).ok().expect("Task not enqueued");
+        taskpool.enqueue(Task::Stop).ok().expect("Task not enqueued");
 
-        assert!(rc1.recv().unwrap() == 10);
+        assert_eq!(rc1.recv().unwrap(), 10);
+    }
+
+    #[test]
+    fn test_task_pool_multi_workers() {
+        let (sn1, rc1) = channel::<isize>();
+        let sn2 = sn1.clone();
+        let task_closure = move || {
+            sn1.send(10).unwrap();
+        };
+        let task_closure2 = move || {
+            sn2.send(10).unwrap();
+        };
+
+        let task1 = Task::new(Box::new(task_closure));
+        let task2 = Task::new(Box::new(task_closure2));
+        let taskpool = TaskPool::new(3);
+
+        taskpool.enqueue(task1).ok().expect("Task not enqueued");
+        taskpool.enqueue(task2).ok().expect("Task not enqueued");
+        taskpool.enqueue(Task::Stop).ok().expect("Task not enqueued");
+
+        assert_eq!(rc1.recv().unwrap(), 10);
+        assert_eq!(rc1.recv().unwrap(), 10);
     }
 }

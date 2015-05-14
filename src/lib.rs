@@ -1,7 +1,7 @@
 #![feature(core)]
 #![feature(alloc)]
 #![feature(box_syntax)]
-#![feature(thread_local_internals)]
+#![feature(scoped)]
 
 pub mod pool;
 pub mod queue;

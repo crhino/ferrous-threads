@@ -38,7 +38,7 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, Acquire};
 
-use queue::{MPMCQueue, Sender, Receiver};
+use queue::{MPMCQueue};
 
 struct Node<T> {
     sequence: AtomicUsize,
@@ -60,13 +60,13 @@ struct State<T> {
 }
 
 unsafe impl<T: Send> Send for State<T> {}
-unsafe impl<T: Sync> Sync for State<T> {}
+// Is this the correct thing to do? My intuition is that since we are explicitly
+// managing the thread-safety of the struct we do not need a T: Sync bound.
+unsafe impl<T: Send> Sync for State<T> {}
 
 pub struct Queue<T> {
     state: Arc<State<T>>,
 }
-
-producer_consumer!(Queue<T>);
 
 impl<T: Send> State<T> {
     fn with_capacity(capacity: usize) -> State<T> {
@@ -178,7 +178,7 @@ impl<T: Send> Clone for Queue<T> {
 mod tests {
     use std::thread;
     use std::sync::mpsc::channel;
-    use queue::{MPMCQueue, Sender, Receiver};
+    use queue::{MPMCQueue, mpmc_channel};
     use super::Queue;
 
     #[test]
@@ -232,11 +232,11 @@ mod tests {
 
     #[test]
     fn test_producer_consumer() {
-        let q = Queue::with_capacity(25);
+        let (sn, rc) = mpmc_channel(25);
 
         let mut guard_vec = Vec::new();
         for i in 0..10 {
-            let sn = q.clone();
+            let sn = sn.clone();
             guard_vec.push(thread::scoped(move || {
                 assert!(sn.send(i as u8).is_ok());
             }));
@@ -248,7 +248,7 @@ mod tests {
 
         guard_vec = Vec::new();
         for _i in 0..10 {
-            let rc = q.clone();
+            let rc = rc.clone();
             guard_vec.push(thread::scoped(move || {
                 let popped = rc.recv().unwrap();
                 let mut found = false;

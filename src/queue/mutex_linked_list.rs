@@ -1,4 +1,4 @@
-use queue::{MPMCQueue, Sender, Receiver};
+use queue::{MPMCQueue};
 use std::cell::{RefCell};
 use std::ptr;
 use std::boxed;
@@ -27,6 +27,9 @@ struct ListInner<T> {
     tail: RefCell<*mut Node<T>>,
 }
 
+unsafe impl<T: Send> Send for ListInner<T> { }
+unsafe impl<T: Send> Sync for ListInner<T> { }
+
 impl<T> ListInner<T> {
     fn new() -> ListInner<T> {
         // Initialize a stub ptr in order to correctly set up the tail and head ptrs.
@@ -41,15 +44,10 @@ impl<T> ListInner<T> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct MutexLinkedList<T> {
+#[derive(Debug)]
+pub struct MutexLinkedList<T> {
     inner: Arc<ListInner<T>>,
 }
-
-producer_consumer!(MutexLinkedList<T>);
-
-unsafe impl<T: Sync> Sync for MutexLinkedList<T> { }
-unsafe impl<T: Send> Send for MutexLinkedList<T> { }
 
 impl<T> MutexLinkedList<T> {
     pub fn new() -> MutexLinkedList<T> {
@@ -66,6 +64,12 @@ impl<T: Send> MPMCQueue<T> for MutexLinkedList<T> {
 
     fn pop(&self) -> Option<T> {
         self.inner.pop()
+    }
+}
+
+impl<T: Send> Clone for MutexLinkedList<T> {
+    fn clone(&self) -> MutexLinkedList<T> {
+        MutexLinkedList { inner: self.inner.clone() }
     }
 }
 
@@ -120,7 +124,7 @@ impl<T> Drop for ListInner<T> {
 #[cfg(test)]
 mod test {
     use super::MutexLinkedList;
-    use queue::{MPMCQueue, Sender, Receiver};
+    use queue::{MPMCQueue, mutex_mpmc_channel};
     use std::thread::scoped;
 
     #[test]
@@ -166,11 +170,11 @@ mod test {
 
     #[test]
     fn test_producer_consumer() {
-        let q = MutexLinkedList::new();
+        let (sn, rc) = mutex_mpmc_channel();
 
         let mut guard_vec = Vec::new();
         for i in 0..10 {
-            let sn = q.clone();
+            let sn = sn.clone();
             guard_vec.push(scoped(move || {
                 assert!(sn.send(i as u8).is_ok());
             }));
@@ -182,7 +186,7 @@ mod test {
 
         guard_vec = Vec::new();
         for _i in 0..10 {
-            let rc = q.clone();
+            let rc = rc.clone();
             guard_vec.push(scoped(move || {
                 let popped = rc.recv().unwrap();
                 let mut found = false;
