@@ -8,24 +8,24 @@ use std::boxed::FnBox;
 use std::thread::{self, scoped, JoinGuard};
 use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
 
-pub enum Task {
-    Data(TaskData),
+enum Task<'a> {
+    Data(TaskData<'a>),
     Stop,
 }
 
-pub struct TaskData {
-    task_func: Box<FnBox() + Send>,
+struct TaskData<'a> {
+    task_func: Box<FnBox() + Send + 'a>,
 }
 
-impl TaskData {
+impl<'a> TaskData<'a> {
     pub fn run(self) {
         self.task_func.call_box(())
     }
 }
 
-impl Task {
-    pub fn new(func: Box<FnBox() + Send>) -> Task {
-        Task::Data(TaskData { task_func: func })
+impl<'a> Task<'a> {
+    pub fn new<F>(func: F) -> Task<'a> where F: FnOnce() + Send + 'a {
+        Task::Data(TaskData { task_func: box func })
     }
 
     pub fn run(self) {
@@ -37,7 +37,7 @@ impl Task {
 }
 
 struct TaskPool<'a> {
-    queue: Sender<Task>,
+    queue: Sender<Task<'a>>,
     workers: Vec<JoinGuard<'a, ()>>,
 }
 
@@ -53,7 +53,8 @@ impl<'a> TaskPool<'a> {
         TaskPool { queue: sn, workers: guards }
     }
 
-    fn enqueue(&self, task: Task) -> Result<(), Task> {
+    fn enqueue<F>(&self, func: F) -> Result<(), Task<'a>> where F: 'a + FnOnce() + Send {
+        let task = Task::new(func);
         self.queue.send(task)
     }
 
@@ -73,7 +74,7 @@ impl<'a> Drop for TaskPool<'a> {
     fn drop(&mut self) {
         // Send stop message without blocking.
         for _thr in self.workers.iter() {
-            self.enqueue(Task::Stop).ok().expect("Could not send Stop message")
+            self.queue.send(Task::Stop).ok().expect("Could not send Stop message")
         }
     }
 }
@@ -89,7 +90,7 @@ mod test {
         let task_closure = move || {
             sn.send(0u8).unwrap();
         };
-        let task = Task::new(Box::new(task_closure));
+        let task = Task::new(task_closure);
         task.run();
         assert!(rc.recv().unwrap() == 0);
     }
@@ -101,12 +102,12 @@ mod test {
         let task_closure = move || {
             sn1.send(10).unwrap();
         };
-        let int_task = Task::new(Box::new(task_closure));
+        let int_task = Task::new(task_closure);
 
         let task_closure = move || {
             sn2.send(Some(10u8)).unwrap();
         };
-        let task = Task::new(Box::new(task_closure));
+        let task = Task::new(task_closure);
 
         let vec = vec![int_task, task];
         for t in vec.into_iter() {
@@ -123,11 +124,9 @@ mod test {
         let task_closure = move || {
             sn1.send(10).unwrap();
         };
-        let task = Task::new(Box::new(task_closure));
         let taskpool = TaskPool::new(1);
 
-        taskpool.enqueue(task).ok().expect("Task not enqueued");
-        taskpool.enqueue(Task::Stop).ok().expect("Task not enqueued");
+        taskpool.enqueue(task_closure).ok().expect("Task not enqueued");
 
         assert_eq!(rc1.recv().unwrap(), 10);
     }
@@ -143,13 +142,10 @@ mod test {
             sn2.send(10).unwrap();
         };
 
-        let task1 = Task::new(Box::new(task_closure));
-        let task2 = Task::new(Box::new(task_closure2));
         let taskpool = TaskPool::new(3);
 
-        taskpool.enqueue(task1).ok().expect("Task not enqueued");
-        taskpool.enqueue(task2).ok().expect("Task not enqueued");
-        taskpool.enqueue(Task::Stop).ok().expect("Task not enqueued");
+        taskpool.enqueue(task_closure).ok().expect("Task not enqueued");
+        taskpool.enqueue(task_closure2).ok().expect("Task not enqueued");
 
         assert_eq!(rc1.recv().unwrap(), 10);
         assert_eq!(rc1.recv().unwrap(), 10);
