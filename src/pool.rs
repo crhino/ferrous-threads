@@ -8,6 +8,8 @@ use std::boxed::FnBox;
 use std::thread::{self, scoped, JoinGuard};
 use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
 
+const QUEUE_SIZE: usize = ((0 - 1) as u8) as usize;
+
 pub enum Task<'a> {
     Data(TaskData<'a>),
     Stop,
@@ -43,7 +45,7 @@ pub struct TaskPool<'a> {
 
 impl<'a> TaskPool<'a> {
     pub fn new(num_threads: u8) -> TaskPool<'a> {
-        let (sn, rc) = mpmc_channel::<Task>(num_threads as usize);
+        let (sn, rc) = mpmc_channel::<Task>(QUEUE_SIZE);
         let mut guards = Vec::new();
         for _i in 0..num_threads {
             let rc = rc.clone();

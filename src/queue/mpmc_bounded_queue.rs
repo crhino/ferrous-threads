@@ -115,6 +115,7 @@ impl<T: Send> State<T> {
                     pos = enqueue_pos;
                 }
             } else if diff < 0 {
+                // The queue is full.
                 return Err(value);
             } else {
                 pos = self.enqueue_pos.load(Relaxed);
@@ -142,6 +143,7 @@ impl<T: Send> State<T> {
                     pos = dequeue_pos;
                 }
             } else if diff < 0 {
+                // The queue is empty.
                 return None
             } else {
                 pos = self.dequeue_pos.load(Relaxed);
