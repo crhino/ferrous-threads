@@ -8,17 +8,17 @@ use std::boxed::FnBox;
 use std::thread::{self, scoped, JoinGuard};
 use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
 
-enum Task<'a> {
+pub enum Task<'a> {
     Data(TaskData<'a>),
     Stop,
 }
 
-struct TaskData<'a> {
+pub struct TaskData<'a> {
     task_func: Box<FnBox() + Send + 'a>,
 }
 
 impl<'a> TaskData<'a> {
-    pub fn run(self) {
+    fn run(self) {
         self.task_func.call_box(())
     }
 }
@@ -36,13 +36,13 @@ impl<'a> Task<'a> {
     }
 }
 
-struct TaskPool<'a> {
+pub struct TaskPool<'a> {
     queue: Sender<Task<'a>>,
     workers: Vec<JoinGuard<'a, ()>>,
 }
 
 impl<'a> TaskPool<'a> {
-    fn new(num_threads: u8) -> TaskPool<'a> {
+    pub fn new(num_threads: u8) -> TaskPool<'a> {
         let (sn, rc) = mpmc_channel::<Task>(num_threads as usize);
         let mut guards = Vec::new();
         for _i in 0..num_threads {
@@ -53,7 +53,7 @@ impl<'a> TaskPool<'a> {
         TaskPool { queue: sn, workers: guards }
     }
 
-    fn enqueue<F>(&self, func: F) -> Result<(), Task<'a>> where F: 'a + FnOnce() + Send {
+    pub fn enqueue<F>(&self, func: F) -> Result<(), Task<'a>> where F: 'a + FnOnce() + Send {
         let task = Task::new(func);
         self.queue.send(task)
     }
@@ -74,7 +74,7 @@ impl<'a> Drop for TaskPool<'a> {
     fn drop(&mut self) {
         // Send stop message without blocking.
         for _thr in self.workers.iter() {
-            self.queue.send(Task::Stop).ok().expect("Could not send Stop message")
+            self.queue.send(Task::Stop).ok().expect("Could not send a stop message.");
         }
     }
 }

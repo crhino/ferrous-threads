@@ -3,5 +3,7 @@
 #![feature(box_syntax)]
 #![feature(scoped)]
 
-pub mod pool;
+mod pool;
 pub mod queue;
+
+pub use pool::TaskPool;
