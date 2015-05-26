@@ -3,14 +3,28 @@ extern crate ferrous_threads;
 use ferrous_threads::TaskPool;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::collections::BitVec;
+use std::env;
 
 
 // http://home.math.au.dk/himsen/Project1_parallel_algorithms_Torben.pdf
 
 fn main() {
-    parallel_sieve(100, 10);
-    let vec = sequential_sieve(100);
-    println!("# of Primes: {}", vec.len());
+    let mut args = env::args();
+    if args.len() != 2 {
+        println!("Must specify either 'parallel' or 'sequential'");
+        return
+    }
+
+    let arg = args.nth(1).unwrap();
+    if arg == String::from_str("parallel") {
+        parallel_sieve(100_000_000, 10);
+    } else if arg == String::from_str("sequential") {
+
+        let vec = sequential_sieve(100_000_000);
+        println!("# of Primes: {}", vec.len());
+    } else {
+        println!("Must specify either 'parallel' or 'sequential'");
+    }
 }
 
 fn sequential_sieve(n: usize) -> Vec<usize> {
