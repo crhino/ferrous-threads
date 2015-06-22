@@ -38,8 +38,8 @@ fn stdin_and_echo() {
     let mut stdout = io::stdout();
 
     let mut buf = String::new();
-    let echo = String::from_str("You said: ");
-    let magic = String::from_str("Rhino\n");
+    let echo = String::from("You said: ");
+    let magic = String::from("Rhino\n");
     assert!(stdout.write_all(magic.as_bytes()).is_ok());
 
     while buf != magic {
@@ -49,5 +49,5 @@ fn stdin_and_echo() {
         assert!(stdout.write_all(buf.as_bytes()).is_ok());
     }
 
-    assert!(stdout.write_all(String::from_str("Goodbye!\n").as_bytes()).is_ok());
+    assert!(stdout.write_all(String::from("Goodbye!\n").as_bytes()).is_ok());
 }
