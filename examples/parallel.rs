@@ -1,4 +1,3 @@
-#![feature(collections)]
 extern crate ferrous_threads;
 use ferrous_threads::TaskPool;
 use std::process::Command;

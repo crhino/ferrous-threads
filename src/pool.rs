@@ -82,7 +82,7 @@ impl<'a> Drop for TaskPool<'a> {
         }
 
         for thr in self.workers.drain(..) {
-            thr.join();
+            thr.join().unwrap();
         }
     }
 }

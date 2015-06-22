@@ -124,7 +124,7 @@ impl<T> Drop for ListInner<T> {
 mod test {
     use super::MutexLinkedList;
     use queue::{MPMCQueue, mutex_mpmc_channel};
-    use std::thread::scoped;
+    use std::thread::spawn;
 
     #[test]
     fn test_push_pop() {
@@ -142,19 +142,19 @@ mod test {
         let mut guard_vec = Vec::new();
         for i in 0..10 {
             let qu = q.clone();
-            guard_vec.push(scoped(move || {
+            guard_vec.push(spawn(move || {
                 assert!(qu.push(i as u8).is_ok());
             }));
         }
 
         for x in guard_vec.into_iter() {
-            x.join();
+            x.join().unwrap();
         }
 
         guard_vec = Vec::new();
         for _i in 0..10 {
             let qu = q.clone();
-            guard_vec.push(scoped(move || {
+            guard_vec.push(spawn(move || {
                 let popped = qu.pop().unwrap();
                 let mut found = false;
                 for x in 0..10 {
@@ -165,6 +165,10 @@ mod test {
                 assert!(found);
             }));
         }
+
+        for thr in guard_vec.into_iter() {
+            thr.join().unwrap();
+        }
     }
 
     #[test]
@@ -174,19 +178,19 @@ mod test {
         let mut guard_vec = Vec::new();
         for i in 0..10 {
             let sn = sn.clone();
-            guard_vec.push(scoped(move || {
+            guard_vec.push(spawn(move || {
                 assert!(sn.send(i as u8).is_ok());
             }));
         }
 
         for x in guard_vec.into_iter() {
-            x.join();
+            x.join().unwrap();
         }
 
         guard_vec = Vec::new();
         for _i in 0..10 {
             let rc = rc.clone();
-            guard_vec.push(scoped(move || {
+            guard_vec.push(spawn(move || {
                 let popped = rc.recv().unwrap();
                 let mut found = false;
                 for x in 0..10 {
@@ -196,6 +200,10 @@ mod test {
                 }
                 assert!(found);
             }));
+        }
+
+        for x in guard_vec.into_iter() {
+            x.join().unwrap();
         }
     }
 }

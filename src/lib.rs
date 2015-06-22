@@ -1,7 +1,4 @@
-#![feature(core)]
-#![feature(alloc)]
 #![feature(box_syntax)]
-#![feature(scoped)]
 #![feature(fnbox)]
 #![feature(box_raw)]
 #![feature(drain)]

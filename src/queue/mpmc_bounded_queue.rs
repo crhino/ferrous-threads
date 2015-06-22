@@ -239,19 +239,19 @@ mod tests {
         let mut guard_vec = Vec::new();
         for i in 0..10 {
             let sn = sn.clone();
-            guard_vec.push(thread::scoped(move || {
+            guard_vec.push(thread::spawn(move || {
                 assert!(sn.send(i as u8).is_ok());
             }));
         }
 
         for x in guard_vec.into_iter() {
-            x.join();
+            x.join().unwrap();
         }
 
         guard_vec = Vec::new();
         for _i in 0..10 {
             let rc = rc.clone();
-            guard_vec.push(thread::scoped(move || {
+            guard_vec.push(thread::spawn(move || {
                 let popped = rc.recv().unwrap();
                 let mut found = false;
                 for x in 0..10 {
@@ -261,6 +261,10 @@ mod tests {
                 }
                 assert!(found);
             }));
+        }
+
+        for x in guard_vec.into_iter() {
+            x.join().unwrap();
         }
     }
 }
