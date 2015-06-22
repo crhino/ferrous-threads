@@ -4,8 +4,9 @@
  * Ferrous Threads
  *
  */
+use std::mem;
 use std::boxed::FnBox;
-use std::thread::{self, scoped, JoinGuard};
+use std::thread::{self, spawn, JoinHandle};
 use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
 
 const QUEUE_SIZE: usize = ((0 - 1) as u8) as usize;
@@ -40,16 +41,17 @@ impl<'a> Task<'a> {
 
 pub struct TaskPool<'a> {
     queue: Sender<Task<'a>>,
-    workers: Vec<JoinGuard<'a, ()>>,
+    workers: Vec<JoinHandle<()>>,
 }
 
 impl<'a> TaskPool<'a> {
     pub fn new(num_threads: u8) -> TaskPool<'a> {
-        let (sn, rc) = mpmc_channel::<Task>(QUEUE_SIZE);
+        let (sn, rc): (Sender<Task<'a>>, Receiver<Task<'a>>) = mpmc_channel::<Task>(QUEUE_SIZE);
         let mut guards = Vec::new();
         for _i in 0..num_threads {
-            let rc = rc.clone();
-            let thr = scoped(move || { TaskPool::worker(rc) });
+            // spawned threads cannot guarantee lifetimes, but we explicitly join on Drop.
+            let rc: Receiver<Task<'static>> = unsafe { mem::transmute(rc.clone()) };
+            let thr = spawn(move || { TaskPool::worker(rc) });
             guards.push(thr);
         }
         TaskPool { queue: sn, workers: guards }
@@ -77,6 +79,10 @@ impl<'a> Drop for TaskPool<'a> {
         // Send stop message without blocking.
         for _thr in self.workers.iter() {
             self.queue.send(Task::Stop).ok().expect("Could not send a stop message.");
+        }
+
+        for thr in self.workers.drain(..) {
+            thr.join();
         }
     }
 }
