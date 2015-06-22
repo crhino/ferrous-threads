@@ -1,4 +1,4 @@
-#![feature(collections)]
+#![feature(bitvec)]
 extern crate ferrous_threads;
 use ferrous_threads::TaskPool;
 use std::sync::mpsc::{Sender, Receiver, channel};
@@ -16,9 +16,9 @@ fn main() {
     }
 
     let arg = args.nth(1).unwrap();
-    if arg == String::from_str("parallel") {
+    if arg == String::from("parallel") {
         parallel_sieve(100_000_000, 10);
-    } else if arg == String::from_str("sequential") {
+    } else if arg == String::from("sequential") {
 
         let vec = sequential_sieve(100_000_000);
         println!("# of Primes: {}", vec.len());

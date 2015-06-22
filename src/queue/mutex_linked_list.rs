@@ -1,7 +1,6 @@
 use queue::{MPMCQueue};
 use std::cell::{RefCell};
 use std::ptr;
-use std::boxed;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +12,7 @@ struct Node<T> {
 
 impl<T> Node<T> {
     unsafe fn new(value: T) -> *mut Node<T> {
-        boxed::into_raw(box Node {
+        Box::into_raw(box Node {
             value: Some(value),
             next: RefCell::new(ptr::null_mut()),
         })
@@ -33,9 +32,9 @@ unsafe impl<T: Send> Sync for ListInner<T> { }
 impl<T> ListInner<T> {
     fn new() -> ListInner<T> {
         // Initialize a stub ptr in order to correctly set up the tail and head ptrs.
-        let stub = unsafe { boxed::into_raw(box Node {
+        let stub = Box::into_raw(box Node {
             value: None, next: RefCell::new(ptr::null_mut())
-        }) };
+        });
         ListInner {
             lock: Mutex::new(true),
             head: RefCell::new(stub),
