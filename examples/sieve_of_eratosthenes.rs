@@ -1,6 +1,6 @@
 #![feature(bitvec)]
 extern crate ferrous_threads;
-use ferrous_threads::TaskPool;
+use ferrous_threads::TaskRunner;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::collections::BitVec;
 use std::env;
@@ -57,7 +57,7 @@ fn sequential_sieve(n: usize) -> Vec<usize> {
 }
 
 fn parallel_sieve(n: usize, num_threads: u8) {
-    let pool = TaskPool::new(num_threads);
+    let pool = TaskRunner::new(num_threads);
     let (sn_primes, accum_primes) = channel::<Option<usize>>();
 
     let sqrt_n = (n as f64).sqrt() as usize + 1;

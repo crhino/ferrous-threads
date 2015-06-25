@@ -1,12 +1,12 @@
 extern crate ferrous_threads;
-use ferrous_threads::TaskPool;
+use ferrous_threads::TaskRunner;
 use std::process::Command;
 use std::string::String;
 use std::io::Write;
 use std::io;
 
 fn main() {
-    let pool = TaskPool::new(4);
+    let pool = TaskRunner::new(4);
     let n: usize = 10000;
     let mut vec = Vec::new();
 

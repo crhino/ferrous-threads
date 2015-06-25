@@ -39,22 +39,22 @@ impl<'a> Task<'a> {
     }
 }
 
-pub struct TaskPool<'a> {
+pub struct TaskRunner<'a> {
     queue: Sender<Task<'a>>,
     workers: Vec<JoinHandle<()>>,
 }
 
-impl<'a> TaskPool<'a> {
-    pub fn new(num_threads: u8) -> TaskPool<'a> {
+impl<'a> TaskRunner<'a> {
+    pub fn new(num_threads: u8) -> TaskRunner<'a> {
         let (sn, rc): (Sender<Task<'a>>, Receiver<Task<'a>>) = mpmc_channel::<Task>(QUEUE_SIZE);
         let mut guards = Vec::new();
         for _i in 0..num_threads {
             // spawned threads cannot guarantee lifetimes, but we explicitly join on Drop.
             let rc: Receiver<Task<'static>> = unsafe { mem::transmute(rc.clone()) };
-            let thr = spawn(move || { TaskPool::worker(rc) });
+            let thr = spawn(move || { TaskRunner::worker(rc) });
             guards.push(thr);
         }
-        TaskPool { queue: sn, workers: guards }
+        TaskRunner { queue: sn, workers: guards }
     }
 
     pub fn enqueue<F>(&self, func: F) -> Result<(), Task<'a>> where F: 'a + FnOnce() + Send {
@@ -74,7 +74,7 @@ impl<'a> TaskPool<'a> {
     }
 }
 
-impl<'a> Drop for TaskPool<'a> {
+impl<'a> Drop for TaskRunner<'a> {
     fn drop(&mut self) {
         // Send stop message without blocking.
         for _thr in self.workers.iter() {
@@ -89,7 +89,7 @@ impl<'a> Drop for TaskPool<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::{Task, TaskPool};
+    use super::{Task, TaskRunner};
     use std::sync::mpsc::{channel};
 
     #[test]
@@ -132,7 +132,7 @@ mod test {
         let task_closure = move || {
             sn1.send(10).unwrap();
         };
-        let taskpool = TaskPool::new(1);
+        let taskpool = TaskRunner::new(1);
 
         taskpool.enqueue(task_closure).ok().expect("Task not enqueued");
 
@@ -150,7 +150,7 @@ mod test {
             sn2.send(10).unwrap();
         };
 
-        let taskpool = TaskPool::new(3);
+        let taskpool = TaskRunner::new(3);
 
         taskpool.enqueue(task_closure).ok().expect("Task not enqueued");
         taskpool.enqueue(task_closure2).ok().expect("Task not enqueued");

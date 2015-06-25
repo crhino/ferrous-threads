@@ -3,8 +3,8 @@
 #![feature(box_raw)]
 #![feature(drain)]
 
-mod pool;
+mod task_runner;
 pub mod queue;
 
-pub use pool::TaskPool;
+pub use task_runner::TaskRunner;
 pub use queue::{mutex_mpmc_channel, mpmc_channel};
