@@ -1,44 +1,130 @@
-use std::sync::mpsc::{channel, Sender, SendError, Receiver};
+use std::sync::mpsc::{channel, Sender, SendError, Receiver, RecvError};
 use std::error::Error;
+use std::sync::{Arc, RwLock};
+use std::fmt;
+use std::any::Any;
+use std::convert::From;
 
-pub struct Publisher<T> {
-    senders: Vec<Sender<T>>
+pub struct Subscriber<T> {
+    receiver: Receiver<T>,
+    self_sender: Sender<T>,
+    publishers: Vec<Arc<Publisher<T>>>,
 }
 
-pub type Subscriber<T> = Receiver<T>;
-
-impl<T: Clone> Publisher<T> {
-    pub fn new() -> Publisher<T> {
-        Publisher {
-            senders: Vec::new(),
+impl<T: Clone> Subscriber<T> {
+    pub fn new() -> Subscriber<T>  {
+        let (sn, rc) = channel();
+        Subscriber {
+            receiver: rc,
+            self_sender: sn,
+            publishers: Vec::new(),
         }
     }
 
-    pub fn subscribe(&mut self, sub: Sender<T>) {
-        self.senders.push(sub);
+    pub fn subscribe(&mut self, p: &Arc<Publisher<T>>) {
+        self.publishers.push(p.clone());
+        p.subscribe(self.self_sender.clone());
     }
 
-    pub fn publish(&mut self, sub: T) -> Result<(), SendError<T>> {
-        for s in self.senders.iter() {
-            let res = s.send(sub.clone());
-            if res.is_err() {
-                return res
-            }
+    pub fn recv(&self) -> Result<T, PubSubError<T>> {
+        let data = try!(self.receiver.recv());
+        Ok(data)
+    }
+}
+
+impl<T: Clone> Clone for Subscriber<T> {
+    fn clone(&self) -> Subscriber<T> {
+        let sub = Subscriber::new();
+        for p in self.publishers.iter() {
+            p.subscribe(sub.self_sender.clone());
+        }
+        sub
+    }
+}
+
+pub struct Publisher<T> {
+    senders: RwLock<Vec<Sender<T>>>
+}
+
+impl<T: Clone> Publisher<T> {
+    pub fn new() -> Arc<Publisher<T>> {
+        Arc::new(Publisher {
+            senders: RwLock::new(Vec::new()),
+        })
+    }
+
+    fn subscribe(&self, sub: Sender<T>) {
+        let mut vec = self.senders.write().unwrap();
+        vec.push(sub);
+    }
+
+    pub fn publish(&self, sub: T) -> Result<(), PubSubError<T>> {
+        let vec = self.senders.read().unwrap();
+        for s in vec.iter() {
+            try!(s.send(sub.clone()));
         }
         Ok(())
     }
 }
 
-pub fn pubsub_channel<T: Clone>(num_subs: usize) -> (Publisher<T>, Vec<Subscriber<T>>) {
-        let mut p = Publisher::new();
-        let mut vec = Vec::new();
 
-        for _a in 0..num_subs {
-            let (sender, sub) = channel();
-            p.subscribe(sender);
-            vec.push(sub);
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct PubSubError<T> {
+    kind: ErrorKind<T>,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum ErrorKind<T> {
+    SendError(SendError<T>),
+    RecvError(RecvError),
+}
+
+impl<T> From<RecvError> for PubSubError<T> {
+    fn from(err: RecvError) -> PubSubError<T> {
+        PubSubError {
+            kind: ErrorKind::RecvError(err),
         }
-        (p, vec)
+    }
+}
+
+impl<T> From<SendError<T>> for PubSubError<T> {
+    fn from(err: SendError<T>) -> PubSubError<T> {
+        PubSubError {
+            kind: ErrorKind::SendError(err),
+        }
+    }
+}
+
+impl<T> fmt::Display for PubSubError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.kind {
+            ErrorKind::SendError(ref se) => se.fmt(f),
+            ErrorKind::RecvError(ref re) => re.fmt(f),
+        }
+    }
+}
+
+impl<T: Any + fmt::Debug + Send> Error for PubSubError<T> {
+    fn description(&self) -> &str {
+        match self.kind {
+            ErrorKind::SendError(ref se) => se.description(),
+            ErrorKind::RecvError(ref re) => re.description(),
+        }
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match self.kind {
+            ErrorKind::SendError(ref se) => se.cause(),
+            ErrorKind::RecvError(ref re) => re.cause(),
+        }
+    }
+}
+
+pub fn pubsub_channel<T: Clone>() -> (Arc<Publisher<T>>, Subscriber<T>) {
+        let p = Publisher::new();
+        let mut s = Subscriber::new();
+        s.subscribe(&p);
+        (p, s)
 }
 
 #[cfg(test)]
@@ -48,11 +134,11 @@ mod test {
 
     #[test]
     fn test_pubsub() {
-        let (sn1, s1) = channel::<usize>();
-        let (sn2, s2) = channel::<usize>();
-        let mut p = Publisher::new();
-        p.subscribe(sn1);
-        p.subscribe(sn2);
+        let mut s1 = Subscriber::new();
+        let mut s2 = Subscriber::new();
+        let p = Publisher::new();
+        s1.subscribe(&p);
+        s2.subscribe(&p);
 
         let res = p.publish(9);
         assert!(res.is_ok());
@@ -64,17 +150,56 @@ mod test {
     }
 
     #[test]
+    fn test_sub_clone() {
+        let p = Publisher::new();
+
+        let mut sub1 = Subscriber::new();
+        sub1.subscribe(&p);
+        let mut sub2 = sub1.clone();
+
+        let res = p.publish(9);
+        assert!(res.is_ok());
+
+        let res = sub2.recv();
+        assert!(res.ok().unwrap() == 9);
+        let res = sub1.recv();
+        assert!(res.ok().unwrap() == 9);
+    }
+
+    #[test]
+    fn test_sub_clone_multi_publish() {
+        let p = Publisher::new();
+        let p2 = Publisher::new();
+
+        let mut sub1 = Subscriber::new();
+        sub1.subscribe(&p);
+        sub1.subscribe(&p2);
+        let mut sub2 = sub1.clone();
+
+        let res = p.publish(9);
+        assert!(res.is_ok());
+        let res = p2.publish(3);
+        assert!(res.is_ok());
+
+        let res = sub2.recv();
+        assert!(res.ok().unwrap() == 9);
+        let res = sub1.recv();
+        assert!(res.ok().unwrap() == 9);
+        let res = sub1.recv();
+        assert!(res.ok().unwrap() == 3);
+        let res = sub2.recv();
+        assert!(res.ok().unwrap() == 3);
+    }
+
+    #[test]
     fn test_pubsub_channel() {
-        let (mut p, subs) = pubsub_channel::<usize>(3);
+        let (p, sub) = pubsub_channel::<usize>();
 
 
         let res = p.publish(9);
         assert!(res.is_ok());
-        assert!(subs.len() == 3);
 
-        for s in subs.iter() {
-            let res = s.recv();
-            assert!(res.ok().unwrap() == 9);
-        }
+        let res = sub.recv();
+        assert!(res.ok().unwrap() == 9);
     }
 }
