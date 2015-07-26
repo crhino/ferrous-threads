@@ -58,17 +58,6 @@ pub struct ThreadPool {
     max_threads: usize,
 }
 
-fn initialize(init_threads: usize, id_sender: Sender<usize>, threads: &Arc<Mutex<Vec<Thread>>>, handles: &Arc<Mutex<Vec<JoinHandle<()>>>>) {
-    let mut locked_thrs = threads.lock().unwrap();
-    let mut locked_handles = handles.lock().unwrap();
-
-    for i in 0..init_threads {
-        let (handle, thread) = spawn_thread(i, id_sender.clone(), threads.clone(), handles.clone());
-        locked_handles.push(handle);
-        locked_thrs.push(thread);
-    }
-}
-
 fn spawn_thread(id: usize, free: Sender<usize>, threads: Arc<Mutex<Vec<Thread>>>, handles: Arc<Mutex<Vec<JoinHandle<()>>>>) -> (JoinHandle<()>, Thread) {
         let (thr, jobs) = channel();
         let (res_sender, res_recver) = mpmc_channel(1);
@@ -89,7 +78,16 @@ impl ThreadPool {
         let threads = Arc::new(Mutex::new(Vec::new()));
         let handles = Arc::new(Mutex::new(Vec::new()));
 
-        initialize(init_threads, sn.clone(), &threads, &handles);
+        {
+            let mut locked_thrs = threads.lock().unwrap();
+            let mut locked_handles = handles.lock().unwrap();
+
+            for i in 0..init_threads {
+                let (handle, thread) = spawn_thread(i, sn.clone(), threads.clone(), handles.clone());
+                locked_handles.push(handle);
+                locked_thrs.push(thread);
+            }
+        }
 
         ThreadPool {
             id_sender: sn,
