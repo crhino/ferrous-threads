@@ -1,6 +1,6 @@
 use std::boxed::FnBox;
 use std::thread::{self, spawn, JoinHandle};
-use std::sync::mpsc::{channel, Sender, SendError, Receiver};
+use std::sync::mpsc::{channel, Sender, SendError, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::error::Error;
 use std::fmt;
@@ -101,12 +101,16 @@ impl ThreadPool {
     }
 
     pub fn thread(&self) -> Result<Thread, ThreadError> {
-        let thr_id = self.free_threads.recv().expect("Could not receive free thread id");
         let thrs = self.threads.lock().unwrap();
         if thrs.len() >= self.max_threads {
             Err(ThreadError)
         } else {
-            Ok(thrs[thr_id].clone())
+            let res = self.free_threads.try_recv();
+            match res {
+                Ok(thr_id) => Ok(thrs[thr_id].clone()),
+                Err(TryRecvError::Empty) => Err(ThreadError),
+                Err(TryRecvError::Disconnected) => panic!("channel closed"),
+            }
         }
     }
 }
@@ -193,8 +197,6 @@ impl ThreadRunner {
 #[cfg(test)]
 mod test {
     use std::sync::mpsc::{channel};
-    // use std::time::{Duration};
-    // use std::thread::{sleep};
     use thread_pool::{ThreadPool, Runner};
 
     #[test]
