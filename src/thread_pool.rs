@@ -7,7 +7,6 @@ use std::fmt;
 
 use queue;
 use mpmc_channel;
-use pubsub::{pubsub_channel, Publisher, Subscriber};
 
 trait Runner {
     fn run(self: Box<Self>);
@@ -52,6 +51,7 @@ impl Thread {
 }
 
 pub struct ThreadPool {
+    id_sender: Sender<usize>, // Keep this for spawning new threads.
     free_threads: Receiver<usize>, // Threads will send their id when they are free.
     thread_handles: Arc<Mutex<Vec<JoinHandle<()>>>>, // Active threads
     threads: Arc<Mutex<Vec<Thread>>>, // Threads
@@ -63,21 +63,24 @@ fn initialize(init_threads: usize, id_sender: Sender<usize>, threads: &Arc<Mutex
     let mut locked_handles = handles.lock().unwrap();
 
     for i in 0..init_threads {
+        let (handle, thread) = spawn_thread(i, id_sender.clone(), threads.clone(), handles.clone());
+        locked_handles.push(handle);
+        locked_thrs.push(thread);
+    }
+}
+
+fn spawn_thread(id: usize, free: Sender<usize>, threads: Arc<Mutex<Vec<Thread>>>, handles: Arc<Mutex<Vec<JoinHandle<()>>>>) -> (JoinHandle<()>, Thread) {
         let (thr, jobs) = channel();
         let (res_sender, res_recver) = mpmc_channel(1);
         let thread = Thread::new(thr, res_recver);
 
-        let free = id_sender.clone();
-        let (sh, st) = (handles.clone(), threads.clone());
-
         let handle = spawn(move || {
-            let sentinel = Sentinel::new(i, sh, st);
-            ThreadRunner::new(i, res_sender, free, jobs).run();
+            let sentinel = Sentinel::new(id, handles, threads);
+            ThreadRunner::new(id, res_sender, free, jobs).run();
             sentinel.done();
         });
-        locked_handles.push(handle);
-        locked_thrs.push(thread);
-    }
+
+        (handle, thread)
 }
 
 impl ThreadPool {
@@ -86,9 +89,10 @@ impl ThreadPool {
         let threads = Arc::new(Mutex::new(Vec::new()));
         let handles = Arc::new(Mutex::new(Vec::new()));
 
-        initialize(init_threads, sn, &threads, &handles);
+        initialize(init_threads, sn.clone(), &threads, &handles);
 
         ThreadPool {
+            id_sender: sn,
             free_threads: rc,
             thread_handles: handles,
             threads: threads,
