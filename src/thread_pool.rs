@@ -1,12 +1,8 @@
 use std::boxed::FnBox;
-use std::thread::{self, spawn, JoinHandle};
+use std::thread::{self, spawn};
 use std::sync::mpsc::{channel, Sender, SendError, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
 use std::error::Error;
 use std::fmt;
-
-use queue;
-use mpmc_channel;
 
 trait Runner {
     fn run(self: Box<Self>);
@@ -21,7 +17,7 @@ impl <F: FnBox()> Runner for F {
 type Proc<'a> = Box<Runner + Send + 'a>;
 
 pub struct Thread {
-    inner: ThreadInner
+    inner: ThreadInner,
 }
 
 struct ThreadInner {
@@ -55,10 +51,10 @@ pub struct ThreadPool {
     max_threads: usize,
 }
 
-fn spawn_thread(id: usize, free: Sender<Thread>) {
+fn spawn_thread(free: Sender<Thread>) {
         spawn(move || {
-            let sentinel = Sentinel::new(id, free.clone());
-            ThreadRunner::new(id, free).run();
+            let sentinel = Sentinel::new(free.clone());
+            ThreadRunner::new(free).run();
             sentinel.done();
         });
 }
@@ -67,8 +63,8 @@ impl ThreadPool {
     pub fn new(init_threads: usize, max_threads: usize) -> ThreadPool {
         let (sn, rc) = channel();
         let mut thrs = Vec::new();
-        for i in 0..init_threads {
-            spawn_thread(i, sn.clone());
+        for _i in 0..init_threads {
+            spawn_thread(sn.clone());
             let thr = rc.recv().expect("Could not receive initial thread");
             thrs.push(thr);
         }
@@ -101,7 +97,7 @@ impl ThreadPool {
                     Err(ThreadError)
                 } else {
                     self.active_threads += 1;
-                    spawn_thread(self.active_threads, self.free_sender.clone());
+                    spawn_thread(self.free_sender.clone());
                     let thr = self.free_threads.recv().expect("Could not receive thread");
                     Ok(thr)
                 }
@@ -127,16 +123,14 @@ impl fmt::Display for ThreadError {
 }
 
 struct Sentinel {
-    id: usize,
     free_threads: Sender<Thread>,
     active: bool,
 }
 
 // Idea taken from https://github.com/rust-lang/threadpool/blob/b9416b4cb591a3ac8bac8efef19e5cbf5e212a9d/src/lib.rs#L40
 impl Sentinel {
-    fn new(id: usize, free_threads: Sender<Thread>) -> Sentinel {
+    fn new(free_threads: Sender<Thread>) -> Sentinel {
         Sentinel {
-            id: id,
             free_threads: free_threads,
             active: true,
         }
@@ -152,20 +146,18 @@ impl Drop for Sentinel {
     fn drop(&mut self) {
         if self.active {
             // Spawn new thread and remove old one.
-            spawn_thread(self.id, self.free_threads.clone());
+            spawn_thread(self.free_threads.clone());
         }
     }
 }
 
 struct ThreadRunner {
-    id: usize,
     free_chan: Sender<Thread>, // ThreadRunner will send its Thread when it is ready to do work
 }
 
 impl ThreadRunner {
-    pub fn new(id: usize, free_chan: Sender<Thread>) -> ThreadRunner {
+    pub fn new(free_chan: Sender<Thread>) -> ThreadRunner {
         ThreadRunner {
-            id: id,
             free_chan: free_chan,
         }
     }
@@ -196,8 +188,6 @@ impl ThreadRunner {
 #[cfg(test)]
 mod test {
     use std::sync::mpsc::{channel};
-    use std::thread;
-    use std::time;
     use thread_pool::{ThreadPool, Runner};
 
     #[test]
@@ -221,7 +211,7 @@ mod test {
         };
 
         let thr1 = pool.thread();
-        let thr2 = pool.thread();
+        let _thr2 = pool.thread();
         let thr3 = pool.thread();
         assert!(thr3.is_err());
 
@@ -261,7 +251,8 @@ mod test {
 
         let res = thr1.start(f1);
         assert!(res.is_ok());
-        thr2.start(f2);
+        let res = thr2.start(f2);
+        assert!(res.is_ok());
         let res = thr1.join();
         assert!(res.is_ok());
         assert!(rc1.recv().unwrap() == 0);
@@ -296,7 +287,8 @@ mod test {
         let thr1 = thr1.ok().unwrap();
         let thr2 = thr2.ok().unwrap();
 
-        thr2.start(f2);
+        let res = thr2.start(f2);
+        assert!(res.is_ok());
         let res = thr2.join();
         assert!(res.is_err());
 
@@ -304,12 +296,14 @@ mod test {
         // Can still get thread after panic
         assert!(thr3.is_ok());
         let thr3 = thr3.ok().unwrap();
-        thr3.start(f3);
+        let res = thr3.start(f3);
+        assert!(res.is_ok());
         let res = thr3.join();
         assert!(res.is_ok());
         assert!(rc3.recv().unwrap() == 0);
 
-        thr1.start(f1);
+        let res = thr1.start(f1);
+        assert!(res.is_ok());
         let res = thr1.join();
         assert!(res.is_ok());
         assert!(rc1.recv().unwrap() == 0);

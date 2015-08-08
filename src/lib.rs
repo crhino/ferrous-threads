@@ -5,10 +5,6 @@
 #![feature(result_expect)]
 #![feature(catch_panic)]
 
-#![feature(duration)]
-#![feature(time)]
-#![feature(thread_sleep)]
-
 //! Ferrous Threads Crate
 //!
 //! This crate contains a number of different structs and functions that are of use
