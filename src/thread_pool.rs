@@ -66,11 +66,16 @@ fn spawn_thread(id: usize, free: Sender<Thread>) {
 impl ThreadPool {
     pub fn new(init_threads: usize, max_threads: usize) -> ThreadPool {
         let (sn, rc) = channel();
+        let mut thrs = Vec::new();
         for i in 0..init_threads {
             spawn_thread(i, sn.clone());
+            let thr = rc.recv().expect("Could not receive initial thread");
+            thrs.push(thr);
         }
 
-        // TODO: Wait for threads to come up
+        for t in thrs.into_iter() {
+            sn.send(t).expect("Could not reinsert threads");
+        }
 
         ThreadPool {
             free_sender: sn,
