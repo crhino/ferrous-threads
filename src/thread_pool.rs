@@ -86,7 +86,14 @@ impl ThreadPool {
     }
 
     pub fn thread(&mut self) -> Result<Thread, ThreadError> {
-        let res = self.free_threads.try_recv();
+        let mut res = Err(TryRecvError::Disconnected);
+        for _i in 0..9 {
+            res = self.free_threads.try_recv();
+            if res.is_ok() {
+                break
+            }
+        }
+
         match res {
             Ok(thr) => Ok(thr),
             Err(TryRecvError::Empty) => {
