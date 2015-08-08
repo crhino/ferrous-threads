@@ -5,6 +5,10 @@
 #![feature(result_expect)]
 #![feature(catch_panic)]
 
+#![feature(duration)]
+#![feature(time)]
+#![feature(thread_sleep)]
+
 mod thread_pool;
 mod task_runner;
 mod pubsub;

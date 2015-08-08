@@ -20,19 +20,17 @@ impl <F: FnBox()> Runner for F {
 
 type Proc<'a> = Box<Runner + Send + 'a>;
 
-#[derive(Clone)]
 pub struct Thread {
     inner: ThreadInner
 }
 
-#[derive(Clone)]
 struct ThreadInner {
     sender: Sender<Proc<'static>>,
-    result: queue::Receiver<thread::Result<()>>,
+    result: Receiver<thread::Result<()>>,
 }
 
 impl Thread {
-    fn new(sender: Sender<Proc<'static>>, result: queue::Receiver<thread::Result<()>>) -> Thread {
+    fn new(sender: Sender<Proc<'static>>, result: Receiver<thread::Result<()>>) -> Thread {
         Thread {
             inner: ThreadInner {
                        sender: sender,
@@ -46,69 +44,57 @@ impl Thread {
     }
 
     pub fn join(&self) -> thread::Result<()> {
-        self.inner.result.recv().unwrap()
+        self.inner.result.recv().expect("Could not get result")
     }
 }
 
 pub struct ThreadPool {
-    id_sender: Sender<usize>, // Keep this for spawning new threads.
-    free_threads: Receiver<usize>, // Threads will send their id when they are free.
-    thread_handles: Arc<Mutex<Vec<JoinHandle<()>>>>, // Active threads
-    threads: Arc<Mutex<Vec<Thread>>>, // Threads
+    free_sender: Sender<Thread>, // Keep this to spawn new threads
+    free_threads: Receiver<Thread>, // Threads will send themselves when they are free.
+    active_threads: usize,
     max_threads: usize,
 }
 
-fn spawn_thread(id: usize, free: Sender<usize>, threads: Arc<Mutex<Vec<Thread>>>, handles: Arc<Mutex<Vec<JoinHandle<()>>>>) -> (JoinHandle<()>, Thread) {
-        let (thr, jobs) = channel();
-        let (res_sender, res_recver) = mpmc_channel(1);
-        let thread = Thread::new(thr, res_recver);
-
-        let handle = spawn(move || {
-            let sentinel = Sentinel::new(id, handles, threads);
-            ThreadRunner::new(id, res_sender, free, jobs).run();
+fn spawn_thread(id: usize, free: Sender<Thread>) {
+        spawn(move || {
+            let sentinel = Sentinel::new(id, free.clone());
+            ThreadRunner::new(id, free).run();
             sentinel.done();
         });
-
-        (handle, thread)
 }
 
 impl ThreadPool {
     pub fn new(init_threads: usize, max_threads: usize) -> ThreadPool {
         let (sn, rc) = channel();
-        let threads = Arc::new(Mutex::new(Vec::new()));
-        let handles = Arc::new(Mutex::new(Vec::new()));
-
-        {
-            let mut locked_thrs = threads.lock().unwrap();
-            let mut locked_handles = handles.lock().unwrap();
-
-            for i in 0..init_threads {
-                let (handle, thread) = spawn_thread(i, sn.clone(), threads.clone(), handles.clone());
-                locked_handles.push(handle);
-                locked_thrs.push(thread);
-            }
+        for i in 0..init_threads {
+            spawn_thread(i, sn.clone());
         }
 
+        // TODO: Wait for threads to come up
+
         ThreadPool {
-            id_sender: sn,
+            free_sender: sn,
             free_threads: rc,
-            thread_handles: handles,
-            threads: threads,
+            active_threads: init_threads,
             max_threads: max_threads
         }
     }
 
-    pub fn thread(&self) -> Result<Thread, ThreadError> {
-        let thrs = self.threads.lock().unwrap();
-        if thrs.len() >= self.max_threads {
-            Err(ThreadError)
-        } else {
-            let res = self.free_threads.try_recv();
-            match res {
-                Ok(thr_id) => Ok(thrs[thr_id].clone()),
-                Err(TryRecvError::Empty) => Err(ThreadError),
-                Err(TryRecvError::Disconnected) => panic!("channel closed"),
+    pub fn thread(&mut self) -> Result<Thread, ThreadError> {
+        let res = self.free_threads.try_recv();
+        match res {
+            Ok(thr) => Ok(thr),
+            Err(TryRecvError::Empty) => {
+                if self.active_threads >= self.max_threads {
+                    Err(ThreadError)
+                } else {
+                    self.active_threads += 1;
+                    spawn_thread(self.active_threads, self.free_sender.clone());
+                    let thr = self.free_threads.recv().expect("Could not receive thread");
+                    Ok(thr)
+                }
             }
+            Err(TryRecvError::Disconnected) => panic!("channel closed"),
         }
     }
 }
@@ -130,22 +116,16 @@ impl fmt::Display for ThreadError {
 
 struct Sentinel {
     id: usize,
-    thread_handles: Arc<Mutex<Vec<JoinHandle<()>>>>, // Active threads
-    threads: Arc<Mutex<Vec<Thread>>>, // Thread job queues
+    free_threads: Sender<Thread>,
     active: bool,
 }
 
 // Idea taken from https://github.com/rust-lang/threadpool/blob/b9416b4cb591a3ac8bac8efef19e5cbf5e212a9d/src/lib.rs#L40
 impl Sentinel {
-    fn new(
-        id: usize,
-        thread_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
-        threads: Arc<Mutex<Vec<Thread>>>
-        ) -> Sentinel {
+    fn new(id: usize, free_threads: Sender<Thread>) -> Sentinel {
         Sentinel {
             id: id,
-            thread_handles: thread_handles,
-            threads: threads,
+            free_threads: free_threads,
             active: true,
         }
     }
@@ -160,34 +140,43 @@ impl Drop for Sentinel {
     fn drop(&mut self) {
         if self.active {
             // Spawn new thread and remove old one.
+            spawn_thread(self.id, self.free_threads.clone());
         }
     }
 }
 
 struct ThreadRunner {
     id: usize,
-    result_chan: queue::Sender<thread::Result<()>>,
-    free_chan: Sender<usize>, // ThreadRunner will send its id when it is ready to do work
-    jobs: Receiver<Proc<'static>>, // Job queue
+    free_chan: Sender<Thread>, // ThreadRunner will send its Thread when it is ready to do work
 }
 
 impl ThreadRunner {
-    pub fn new(id: usize, result_chan: queue::Sender<thread::Result<()>>, free_chan: Sender<usize>, jobs: Receiver<Proc<'static>>) -> ThreadRunner {
+    pub fn new(id: usize, free_chan: Sender<Thread>) -> ThreadRunner {
         ThreadRunner {
             id: id,
-            result_chan: result_chan,
             free_chan: free_chan,
-            jobs: jobs,
         }
     }
 
     fn run(self) {
-        self.free_chan.send(self.id).unwrap();
         loop {
-            let job = self.jobs.recv().unwrap();
+            let (thr, jobs) = channel();
+            let (res_sender, res_recver) = channel();
+            let thread = Thread::new(thr, res_recver);
+
+            let res = self.free_chan.send(thread);
+            if res.is_err() {
+                // ThreadPool has disconnected
+                return
+            }
+            let res = jobs.recv();
+            if res.is_err() {
+                // Thread has disconnected
+                return
+            }
+            let job = res.unwrap();
             let res = thread::catch_panic(move || { job.run(); });
-            self.result_chan.send(res).unwrap();
-            self.free_chan.send(self.id).unwrap();
+            res_sender.send(res).expect("Could not send result");
         }
     }
 }
@@ -195,6 +184,8 @@ impl ThreadRunner {
 #[cfg(test)]
 mod test {
     use std::sync::mpsc::{channel};
+    use std::thread;
+    use std::time;
     use thread_pool::{ThreadPool, Runner};
 
     #[test]
@@ -211,7 +202,7 @@ mod test {
     fn test_thread_pool_thread_and_start() {
         let (sn, rc) = channel::<u8>();
         let (init, max) = (1, 2);
-        let pool = ThreadPool::new(init, max);
+        let mut pool = ThreadPool::new(init, max);
 
         let f = box move || {
             sn.send(0u8).unwrap();
@@ -222,6 +213,7 @@ mod test {
         let thr3 = pool.thread();
         assert!(thr3.is_err());
 
+        assert!(thr1.is_ok());
         let thr1 = thr1.ok().unwrap();
 
         let res = thr1.start(f);
@@ -234,7 +226,7 @@ mod test {
     fn test_thread_pool_join() {
         let (sn1, rc1) = channel::<u8>();
         let (init, max) = (1, 2);
-        let pool = ThreadPool::new(init, max);
+        let mut pool = ThreadPool::new(init, max);
 
         let f1 = box move || {
             sn1.send(0u8).unwrap();
@@ -248,13 +240,19 @@ mod test {
         let thr1 = pool.thread();
         // Start a new one.
         let thr2 = pool.thread();
+
+        assert!(thr1.is_ok());
         let thr1 = thr1.ok().unwrap();
+
+        assert!(thr2.is_ok());
         let thr2 = thr2.ok().unwrap();
 
-        thr1.start(f1);
+        let res = thr1.start(f1);
+        assert!(res.is_ok());
         thr2.start(f2);
         let res = thr1.join();
         assert!(res.is_ok());
+        assert!(rc1.recv().unwrap() == 0);
 
         let res = thr2.join();
         assert!(res.is_err());
@@ -263,11 +261,16 @@ mod test {
     #[test]
     fn test_thread_pool_max_threads_panic() {
         let (sn1, rc1) = channel::<u8>();
+        let (sn3, rc3) = channel::<u8>();
         let (init, max) = (1, 2);
-        let pool = ThreadPool::new(init, max);
+        let mut pool = ThreadPool::new(init, max);
 
         let f1 = box move || {
             sn1.send(0u8).unwrap();
+        };
+
+        let f3 = box move || {
+            sn3.send(0u8).unwrap();
         };
 
         let f2 = box move || {
@@ -288,9 +291,15 @@ mod test {
         let thr3 = pool.thread();
         // Can still get thread after panic
         assert!(thr3.is_ok());
+        let thr3 = thr3.ok().unwrap();
+        thr3.start(f3);
+        let res = thr3.join();
+        assert!(res.is_ok());
+        assert!(rc3.recv().unwrap() == 0);
 
         thr1.start(f1);
         let res = thr1.join();
         assert!(res.is_ok());
+        assert!(rc1.recv().unwrap() == 0);
     }
 }
