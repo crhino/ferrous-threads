@@ -11,6 +11,8 @@ use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
 
 const QUEUE_SIZE: usize = ((0 - 1) as u8) as usize;
 
+
+/// The unit of work for a TaskRunner.
 pub enum Task<'a> {
     Data(TaskData<'a>),
     Stop,
@@ -27,11 +29,11 @@ impl<'a> TaskData<'a> {
 }
 
 impl<'a> Task<'a> {
-    pub fn new<F>(func: F) -> Task<'a> where F: FnOnce() + Send + 'a {
+    fn new<F>(func: F) -> Task<'a> where F: FnOnce() + Send + 'a {
         Task::Data(TaskData { task_func: box func })
     }
 
-    pub fn run(self) {
+    fn run(self) {
         match self {
             Task::Data(task) => task.run(),
             Task::Stop => (),
@@ -39,6 +41,30 @@ impl<'a> Task<'a> {
     }
 }
 
+/// A TaskRunner is used to run short-lived tasks in parallel without having to
+/// spin up a new thread each and every time.
+///
+/// The TaskRunner will immediately spin up the number of threads that was passed in
+/// on creation.
+///
+/// Spins up a number of threads and distbutes the enqueued tasks through a
+/// multi-producer/multi-consumer queue. This allows every worker to draw from the same queue,
+/// ensuring that work will be efficiently distributed across the threads.
+///
+/// # Panics
+/// The failure case of a task panicking and destroying the worker is not handled.
+///
+/// # Examples
+/// ```
+/// use ferrous_threads::task_runner::TaskRunner;
+///
+/// use std::sync::mpsc::channel;
+///
+/// let (sn, rc) = channel();
+/// let taskpool = TaskRunner::new(1);
+/// taskpool.enqueue(move || { sn.send(9u8).unwrap();}).ok().expect("Task not enqueued");
+/// assert!(rc.recv().unwrap() == 9u8);
+/// ```
 pub struct TaskRunner<'a> {
     queue: Sender<Task<'a>>,
     workers: Vec<JoinHandle<()>>,
@@ -57,6 +83,7 @@ impl<'a> TaskRunner<'a> {
         TaskRunner { queue: sn, workers: guards }
     }
 
+    /// Places the enqueued function on the worker queue.
     pub fn enqueue<F>(&self, func: F) -> Result<(), Task<'a>> where F: 'a + FnOnce() + Send {
         let task = Task::new(func);
         self.queue.send(task)

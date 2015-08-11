@@ -1,6 +1,7 @@
 extern crate ferrous_threads;
 extern crate bit_vec;
-use ferrous_threads::TaskRunner;
+
+use ferrous_threads::task_runner::TaskRunner;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use bit_vec::BitVec;
 use std::env;

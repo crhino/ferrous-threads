@@ -1,5 +1,5 @@
 extern crate ferrous_threads;
-use ferrous_threads::TaskRunner;
+use ferrous_threads::task_runner::TaskRunner;
 use std::process::Command;
 use std::string::String;
 use std::io::Write;
