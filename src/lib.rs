@@ -13,9 +13,9 @@
 //! This includes a thread pool, a multi-producer/multi-consumer queue, a task runner, and
 //! a publish/subscribe queue.
 
-mod thread_pool;
 mod task_runner;
 mod pubsub;
+pub mod thread_pool;
 pub mod queue;
 
 pub use task_runner::TaskRunner;

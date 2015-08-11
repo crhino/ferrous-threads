@@ -14,8 +14,12 @@ impl <F: FnBox()> Runner for F {
     }
 }
 
-type Proc<'a> = Box<Runner + Send + 'a>;
+/// Type used by ThreadPool to run closures, etc. on the spawned threads.
+pub type Proc<'a> = Box<Runner + Send + 'a>;
 
+/// Used to interact with the spawned threads returned by the ThreadPool.
+///
+/// See documentation for ThreadPool for more information.
 pub struct Thread {
     inner: ThreadInner,
 }
@@ -35,15 +39,35 @@ impl Thread {
         }
     }
 
+    /// Sends the runnable object to a spawned thread to be run.
     pub fn start(&self, f: Proc<'static>) -> Result<(), SendError<Proc<'static>>> {
         self.inner.sender.send(f)
     }
 
+    /// Blocks on the result of the started Proc.
+    ///
+    /// Do not use if no Proc is being run!
     pub fn join(&self) -> thread::Result<()> {
         self.inner.result.recv().expect("Could not get result")
     }
 }
 
+/// The ThreadPool that manages the state of the threads and spawns new ones.
+///
+/// ```
+/// #![feature(box_syntax)]
+/// #![feature(result_expect)]
+/// use std::sync::mpsc::channel;
+/// use ferrous_threads::thread_pool::ThreadPool;
+///
+/// let mut pool = ThreadPool::new(1, 2);
+/// let thread = pool.thread().unwrap();
+///
+/// let (sn, rc) = channel();
+/// thread.start(box move || { sn.send(9u8).unwrap();}).expect("Could not send Proc");
+/// assert!(thread.join().is_ok());
+/// assert!(rc.recv().unwrap() == 9u8);
+/// ```
 pub struct ThreadPool {
     free_sender: Sender<Thread>, // Keep this to spawn new threads
     free_threads: Receiver<Thread>, // Threads will send themselves when they are free.
@@ -81,6 +105,7 @@ impl ThreadPool {
         }
     }
 
+    /// Returns a handle to a spawned thread or an error if there are no more threads available.
     pub fn thread(&mut self) -> Result<Thread, ThreadError> {
         let mut res = Err(TryRecvError::Disconnected);
         for _i in 0..9 {
