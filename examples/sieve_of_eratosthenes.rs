@@ -1,8 +1,8 @@
-#![feature(bitvec)]
 extern crate ferrous_threads;
+extern crate bit_vec;
 use ferrous_threads::TaskRunner;
 use std::sync::mpsc::{Sender, Receiver, channel};
-use std::collections::BitVec;
+use bit_vec::BitVec;
 use std::env;
 
 

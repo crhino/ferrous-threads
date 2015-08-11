@@ -130,7 +130,6 @@ pub fn pubsub_channel<T: Clone>() -> (Arc<Publisher<T>>, Subscriber<T>) {
 #[cfg(test)]
 mod test {
     use super::{Publisher, Subscriber, pubsub_channel};
-    use std::sync::mpsc::{channel};
 
     #[test]
     fn test_pubsub() {
@@ -155,7 +154,7 @@ mod test {
 
         let mut sub1 = Subscriber::new();
         sub1.subscribe(&p);
-        let mut sub2 = sub1.clone();
+        let sub2 = sub1.clone();
 
         let res = p.publish(9);
         assert!(res.is_ok());
@@ -174,7 +173,7 @@ mod test {
         let mut sub1 = Subscriber::new();
         sub1.subscribe(&p);
         sub1.subscribe(&p2);
-        let mut sub2 = sub1.clone();
+        let sub2 = sub1.clone();
 
         let res = p.publish(9);
         assert!(res.is_ok());

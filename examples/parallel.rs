@@ -33,7 +33,7 @@ fn sleep_and_cat() {
 }
 
 fn stdin_and_echo() {
-    let mut stdin = io::stdin();
+    let stdin = io::stdin();
     let mut stdout = io::stdout();
 
     let mut buf = String::new();
