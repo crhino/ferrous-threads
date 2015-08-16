@@ -111,12 +111,10 @@ impl ThreadPool {
 
     /// Returns a handle to a spawned thread or an error if there are no more threads available.
     pub fn thread(&mut self) -> Result<Thread, ThreadError> {
-        let mut res = Err(TryRecvError::Disconnected);
-        for _i in 0..9 {
+        let mut res = self.free_threads.try_recv();
+        if res.is_err() {
+            thread::yield_now();
             res = self.free_threads.try_recv();
-            if res.is_ok() {
-                break
-            }
         }
 
         match res {
@@ -221,6 +219,7 @@ impl ThreadRunner {
 
 #[cfg(test)]
 mod test {
+    use std::thread;
     use std::sync::mpsc::{channel};
     use thread_pool::{ThreadPool, Runner};
 
@@ -325,6 +324,8 @@ mod test {
         assert!(res.is_ok());
         let res = thr2.join();
         assert!(res.is_err());
+
+        thread::sleep_ms(100);
 
         let thr3 = pool.thread();
         // Can still get thread after panic
