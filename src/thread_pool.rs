@@ -68,6 +68,10 @@ impl Thread {
 /// assert!(thread.join().is_ok());
 /// assert!(rc.recv().unwrap() == 9u8);
 /// ```
+///
+/// When requesting a thread, this pool will either return a unused thread that has already been
+/// spawned, spin up a new thread, or return an error if the maximum number of threads has been
+/// reached.
 pub struct ThreadPool {
     free_sender: Sender<Thread>, // Keep this to spawn new threads
     free_threads: Receiver<Thread>, // Threads will send themselves when they are free.
@@ -132,6 +136,7 @@ impl ThreadPool {
     }
 }
 
+/// Error type used by the ThreadPool
 #[derive(Debug, Clone)]
 pub struct ThreadError;
 

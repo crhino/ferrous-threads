@@ -5,6 +5,7 @@ use std::fmt;
 use std::any::Any;
 use std::convert::From;
 
+/// Subscriber channel, can subscribe to multiple Publishers
 pub struct Subscriber<T> {
     receiver: Receiver<T>,
     self_sender: Sender<T>,
@@ -42,6 +43,8 @@ impl<T: Clone> Clone for Subscriber<T> {
     }
 }
 
+/// Publisher channel, any data sent through this publisher will be cloned and sent to all of the
+/// dependent subscribers.
 pub struct Publisher<T> {
     senders: RwLock<Vec<Sender<T>>>
 }
@@ -120,6 +123,7 @@ impl<T: Any + fmt::Debug + Send> Error for PubSubError<T> {
     }
 }
 
+/// Helper function to create a new pair of (Publisher, Subscriber)
 pub fn pubsub_channel<T: Clone>() -> (Arc<Publisher<T>>, Subscriber<T>) {
         let p = Publisher::new();
         let mut s = Subscriber::new();
