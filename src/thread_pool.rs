@@ -205,7 +205,11 @@ impl ThreadRunner {
             }
             let job = res.unwrap();
             let res = thread::catch_panic(move || { job.run(); });
-            res_sender.send(res).expect("Could not send result");
+            let res = res_sender.send(res);
+            if res.is_err() {
+                // Thread has disconnected
+                return
+            }
         }
     }
 }
