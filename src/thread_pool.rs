@@ -1,3 +1,40 @@
+//! This module contains an implementation of a thread pool that will automatically spin up a
+//! configurable amount of OS threads on start-up, and will only allow a configurable amount of
+//! total OS threads.
+//!
+//! ```
+//! #![feature(box_syntax)]
+//! #![feature(result_expect)]
+//! use std::sync::mpsc::channel;
+//! use ferrous_threads::thread_pool::ThreadPool;
+//!
+//! let mut pool = ThreadPool::new(1, 2);
+//! let thread = pool.thread().unwrap();
+//!
+//! let (sn, rc) = channel();
+//! thread.start(box move || { sn.send(9u8).unwrap();}).expect("Could not send Proc");
+//! assert!(thread.join().is_ok());
+//! assert!(rc.recv().unwrap() == 9u8);
+//! ```
+//!
+//! If a job running on a thread panics, the pool will detect this and spawn a new thread to take
+//! the place of the old one. The user of the pool is able to detect this error condition through
+//! the result returned on join().
+//!
+//! ```
+//! #![feature(box_syntax)]
+//! #![feature(result_expect)]
+//! use std::sync::mpsc::channel;
+//! use ferrous_threads::thread_pool::ThreadPool;
+//!
+//! let mut pool = ThreadPool::new(1, 2);
+//! let _ = pool.thread().unwrap();
+//! let thread = pool.thread().unwrap();
+//!
+//! thread.start(box move || { panic!();}).expect("Could not send Proc");
+//! assert!(thread.join().is_err());
+//! ```
+
 use std::boxed::FnBox;
 use std::thread::{self, spawn};
 use std::sync::mpsc::{channel, Sender, SendError, Receiver, TryRecvError};
@@ -53,21 +90,6 @@ impl Thread {
 }
 
 /// The ThreadPool that manages the state of the threads and spawns new ones.
-///
-/// ```
-/// #![feature(box_syntax)]
-/// #![feature(result_expect)]
-/// use std::sync::mpsc::channel;
-/// use ferrous_threads::thread_pool::ThreadPool;
-///
-/// let mut pool = ThreadPool::new(1, 2);
-/// let thread = pool.thread().unwrap();
-///
-/// let (sn, rc) = channel();
-/// thread.start(box move || { sn.send(9u8).unwrap();}).expect("Could not send Proc");
-/// assert!(thread.join().is_ok());
-/// assert!(rc.recv().unwrap() == 9u8);
-/// ```
 ///
 /// When requesting a thread, this pool will either return a unused thread that has already been
 /// spawned, spin up a new thread, or return an error if the maximum number of threads has been
