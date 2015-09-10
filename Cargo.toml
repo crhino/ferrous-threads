@@ -1,8 +1,15 @@
 [package]
 
-name = "ferrous-threads"
-version = "0.0.1"
+name = "ferrous_threads"
+version = "0.0.2"
 authors = ["crhino <piraino.chris@gmail.com>"]
 
-[dependencies]
+description = "Task runner, thread pools, multi-producer, multi-consumer queues, oh my! This is a crate with helpers for building concurrent software easily and safely."
+
+readme = "./README.md"
+repository = "https://github.com/crhino/transit"
+keywords = ["concurrency", "threads"]
+license = "BSD-3-Clause"
+
+[dev-dependencies]
 bit-vec = "0.4.1"
