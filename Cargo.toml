@@ -11,5 +11,8 @@ repository = "https://github.com/crhino/transit"
 keywords = ["concurrency", "threads"]
 license = "BSD-3-Clause"
 
+[dependencies]
+canal = { version = "*", features = ["nightly"] }
+
 [dev-dependencies]
 bit-vec = "0.4.1"

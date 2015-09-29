@@ -7,7 +7,7 @@
 use std::mem;
 use std::boxed::FnBox;
 use std::thread::{self, spawn, JoinHandle};
-use queue::{Sender, Receiver, MPMCQueue, mpmc_channel};
+use canal::mpmc::{Sender, Receiver, mpmc_channel};
 
 const QUEUE_SIZE: usize = ((0 - 1) as u8) as usize;
 
