@@ -1,6 +1,5 @@
 #![feature(box_syntax)]
 #![feature(fnbox)]
-#![feature(box_raw)]
 #![feature(drain)]
 #![feature(result_expect)]
 #![feature(catch_panic)]
