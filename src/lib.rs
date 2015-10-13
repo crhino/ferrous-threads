@@ -1,8 +1,9 @@
 #![feature(box_syntax)]
 #![feature(fnbox)]
 #![feature(drain)]
-#![feature(result_expect)]
 #![feature(catch_panic)]
+
+#![warn(missing_docs, dead_code)]
 
 //! Ferrous Threads Crate
 //!

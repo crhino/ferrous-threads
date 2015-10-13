@@ -37,7 +37,7 @@
 
 use std::boxed::FnBox;
 use std::thread::{self, spawn};
-use std::sync::mpsc::{channel, Sender, SendError, Receiver, TryRecvError};
+use std::sync::mpsc::{channel, Sender, SendError, Receiver, TryRecvError, RecvError};
 use std::error::Error;
 use std::fmt;
 
@@ -101,15 +101,17 @@ pub struct ThreadPool {
     max_threads: usize,
 }
 
+// TODO: instrument with log crate and log errors
 fn spawn_thread(free: Sender<Thread>) {
         spawn(move || {
             let sentinel = Sentinel::new(free.clone());
-            ThreadRunner::new(free).run();
-            sentinel.done();
+            let res = ThreadRunner::new(free).run();
+            if res.is_ok() { sentinel.done() };
         });
 }
 
 impl ThreadPool {
+    /// Create a new thread pool with initial and max thread counts.
     pub fn new(init_threads: usize, max_threads: usize) -> ThreadPool {
         let (sn, rc) = channel();
         let mut thrs = Vec::new();
@@ -143,7 +145,7 @@ impl ThreadPool {
             Ok(thr) => Ok(thr),
             Err(TryRecvError::Empty) => {
                 if self.active_threads >= self.max_threads {
-                    Err(ThreadError)
+                    Err(ThreadError::NoMoreThreads)
                 } else {
                     self.active_threads += 1;
                     spawn_thread(self.free_sender.clone());
@@ -158,17 +160,44 @@ impl ThreadPool {
 
 /// Error type used by the ThreadPool
 #[derive(Debug, Clone)]
-pub struct ThreadError;
+pub enum ThreadError {
+    /// No more threads available
+    NoMoreThreads,
+    /// An error on sending to a channel
+    SendError,
+    /// An error on receiving from a channel
+    RecvError,
+}
+
+impl<T> From<SendError<T>> for ThreadError {
+    fn from(_err: SendError<T>) -> ThreadError {
+        ThreadError::SendError
+    }
+}
+
+impl From<RecvError> for ThreadError {
+    fn from(_err: RecvError) -> ThreadError {
+        ThreadError::RecvError
+    }
+}
 
 impl Error for ThreadError {
     fn description(&self) -> &str {
-        "Could not make any more threads."
+        match *self {
+            ThreadError::NoMoreThreads => "Could not make any more threads",
+            ThreadError::SendError => "Could not send data over channel",
+            ThreadError::RecvError => "Could not receive data over channel",
+        }
     }
 }
 
 impl fmt::Display for ThreadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        "Could not make any more threads.".fmt(f)
+        match *self {
+            ThreadError::NoMoreThreads => "Could not make any more threads.".fmt(f),
+            ThreadError::SendError => "Could not send data over channel".fmt(f),
+            ThreadError::RecvError => "Could not receive data over channel".fmt(f),
+        }
     }
 }
 
@@ -212,29 +241,17 @@ impl ThreadRunner {
         }
     }
 
-    fn run(self) {
+    // TODO: How to shut down threads?
+    fn run(self) -> Result<(), ThreadError> {
         loop {
             let (thr, jobs) = channel();
             let (res_sender, res_recver) = channel();
             let thread = Thread::new(thr, res_recver);
 
-            let res = self.free_chan.send(thread);
-            if res.is_err() {
-                // ThreadPool has disconnected
-                return
-            }
-            let res = jobs.recv();
-            if res.is_err() {
-                // Thread has disconnected
-                return
-            }
-            let job = res.unwrap();
+            try!(self.free_chan.send(thread));
+            let job = try!(jobs.recv());
             let res = thread::catch_panic(move || { job.run(); });
-            let res = res_sender.send(res);
-            if res.is_err() {
-                // Thread has disconnected
-                return
-            }
+            try!(res_sender.send(res));
         }
     }
 }
