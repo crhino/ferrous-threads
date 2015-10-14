@@ -116,7 +116,7 @@ impl<'a> TaskRunner<'a> {
             match msg {
                 Ok(Task::Data(task)) => task.run(),
                 Ok(Task::Stop) => break,
-                Err(e)  => panic!(e),
+                Err(_)  => break, // TODO: Do something better
             }
         }
     }
@@ -130,7 +130,7 @@ impl<'a> Drop for TaskRunner<'a> {
         }
 
         for thr in self.workers.drain(..) {
-            thr.join().expect("Could not join on a thread");
+            thr.join().expect("Thread panicked");
         }
     }
 }
