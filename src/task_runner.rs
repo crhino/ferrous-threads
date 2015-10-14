@@ -4,21 +4,29 @@
  * Ferrous Threads
  *
  */
+//! A TaskRunner is used when a number of short-lived tasks need to be asynchronously
+//! done. Here we negate the cost of thread startup by using a fixed amount of threads
+//! to serve a potentially infinite series of tasks.
+//!
+//! # Warnings
+//! Currently the mpmc channel implementation has some bugs, it is currently not recommended
+//! to use the TaskRunner yet.
 use std::mem;
 use std::boxed::FnBox;
-use std::thread::{self, spawn, JoinHandle};
+use std::fmt;
+use std::error::Error;
+use std::thread::{spawn, JoinHandle};
 use canal::mpmc::{Sender, Receiver, mpmc_channel};
 
 const QUEUE_SIZE: usize = ((0 - 1) as u8) as usize;
 
 
-/// The unit of work for a TaskRunner.
-pub enum Task<'a> {
+enum Task<'a> {
     Data(TaskData<'a>),
     Stop,
 }
 
-pub struct TaskData<'a> {
+struct TaskData<'a> {
     task_func: Box<FnBox() + Send + 'a>,
 }
 
@@ -32,12 +40,20 @@ impl<'a> Task<'a> {
     fn new<F>(func: F) -> Task<'a> where F: FnOnce() + Send + 'a {
         Task::Data(TaskData { task_func: box func })
     }
+}
 
-    fn run(self) {
-        match self {
-            Task::Data(task) => task.run(),
-            Task::Stop => (),
-        }
+/// An error sending to a running thread.
+#[derive(Debug)]
+pub struct SendError;
+impl Error for SendError {
+    fn description(&self) -> &str {
+        "Could not send to a thread"
+    }
+}
+
+impl fmt::Display for SendError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        "Could not send to a thread".fmt(f)
     }
 }
 
@@ -71,6 +87,7 @@ pub struct TaskRunner<'a> {
 }
 
 impl<'a> TaskRunner<'a> {
+    /// Create a new TaskRunner with specified number of threads.
     pub fn new(num_threads: u8) -> TaskRunner<'a> {
         let (sn, rc): (Sender<Task<'a>>, Receiver<Task<'a>>) = mpmc_channel::<Task>(QUEUE_SIZE);
         let mut guards = Vec::new();
@@ -84,9 +101,13 @@ impl<'a> TaskRunner<'a> {
     }
 
     /// Places the enqueued function on the worker queue.
-    pub fn enqueue<F>(&self, func: F) -> Result<(), Task<'a>> where F: 'a + FnOnce() + Send {
+    pub fn enqueue<F>(&self, func: F) -> Result<(), SendError> where F: 'a + FnOnce() + Send {
         let task = Task::new(func);
-        self.queue.send(task)
+        let res = self.queue.send(task);
+        match res {
+            Ok(_) => Ok(()),
+            Err(_) => Err(SendError),
+        }
     }
 
     fn worker(rc: Receiver<Task>) {
@@ -109,14 +130,14 @@ impl<'a> Drop for TaskRunner<'a> {
         }
 
         for thr in self.workers.drain(..) {
-            thr.join().unwrap();
+            thr.join().expect("Could not join on a thread");
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{Task, TaskRunner};
+    use super::{TaskData, TaskRunner};
     use std::sync::mpsc::{channel};
 
     #[test]
@@ -125,7 +146,7 @@ mod test {
         let task_closure = move || {
             sn.send(0u8).unwrap();
         };
-        let task = Task::new(task_closure);
+        let task = TaskData { task_func: box task_closure };
         task.run();
         assert!(rc.recv().unwrap() == 0);
     }
@@ -137,12 +158,12 @@ mod test {
         let task_closure = move || {
             sn1.send(10).unwrap();
         };
-        let int_task = Task::new(task_closure);
+        let int_task = TaskData { task_func: box task_closure };
 
         let task_closure = move || {
             sn2.send(Some(10u8)).unwrap();
         };
-        let task = Task::new(task_closure);
+        let task = TaskData { task_func: box task_closure };
 
         let vec = vec![int_task, task];
         for t in vec.into_iter() {

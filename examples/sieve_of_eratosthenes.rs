@@ -33,7 +33,7 @@ fn sequential_sieve(n: usize) -> Vec<usize> {
     let mut primes = Vec::new();
     let sqrt_n = (n as f64).sqrt() as usize + 1;
 
-    for i in (2..sqrt_n) {
+    for i in 2..sqrt_n {
         if !n_array.get(i).unwrap() {
             continue
         }
@@ -48,7 +48,7 @@ fn sequential_sieve(n: usize) -> Vec<usize> {
         }
     }
 
-    for i in ((sqrt_n)..n) {
+    for i in sqrt_n..n {
         if n_array.get(i).unwrap() {
             primes.push(i);
         }
@@ -71,7 +71,7 @@ fn parallel_sieve(n: usize, num_threads: u8) {
 
     let mut sn_sieves = Vec::new();
     let mut rc_sieves = Vec::new();
-    for _i in (1..num_workers) {
+    for _i in 1..num_workers {
         let (sn, rc) = channel::<Option<usize>>();
         sn_sieves.push(sn);
         rc_sieves.push(rc);
@@ -95,7 +95,7 @@ fn sieve_master(n: usize, n_threads: u8, sn_sieves: Vec<Sender<Option<usize>>>, 
     let left = 2;
     let mut sieve_vec = BitVec::from_elem(right - left + 1, true);
     let len = sieve_vec.len();
-    for i in (0..len) {
+    for i in 0..len {
         if sieve_vec.get(i).unwrap() {
             let prime = left + i;
             send_prime_to_workers(prime, &sn_sieves);

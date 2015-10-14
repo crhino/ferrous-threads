@@ -12,7 +12,7 @@ fn main() {
 
     pool.enqueue(move || { sleep_and_cat() }).ok().expect("closure not queued");
     pool.enqueue(move || {
-        for i in (0..n) {
+        for i in 0..n {
             vec.push(i);
             vec[i/2] = i;
         }

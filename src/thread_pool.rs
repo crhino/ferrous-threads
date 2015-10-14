@@ -102,11 +102,16 @@ pub struct ThreadPool {
 }
 
 // TODO: instrument with log crate and log errors
+// If run() returns error, we say we are done because
+// an error can only occur when a channel fails to send or recv.
+// This probably indicates that something has been disconnected.
+//
+// Is that what we want?
 fn spawn_thread(free: Sender<Thread>) {
         spawn(move || {
             let sentinel = Sentinel::new(free.clone());
-            let res = ThreadRunner::new(free).run();
-            if res.is_ok() { sentinel.done() };
+            let _res = ThreadRunner::new(free).run();
+            sentinel.done();
         });
 }
 
