@@ -93,9 +93,9 @@ impl<'a> TaskRunner<'a> {
         loop {
             let msg = rc.recv();
             match msg {
-                Some(Task::Data(task)) => task.run(),
-                Some(Task::Stop) => break,
-                None  => thread::yield_now(),
+                Ok(Task::Data(task)) => task.run(),
+                Ok(Task::Stop) => break,
+                Err(e)  => panic!(e),
             }
         }
     }
