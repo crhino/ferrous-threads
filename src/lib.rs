@@ -3,7 +3,7 @@
 #![feature(drain)]
 #![feature(catch_panic)]
 
-#![warn(missing_docs, dead_code)]
+#![deny(missing_docs, dead_code)]
 
 //! Ferrous Threads Crate
 //!
